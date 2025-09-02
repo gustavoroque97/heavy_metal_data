@@ -134,13 +134,22 @@ class AngryMetalGuyCleaner:
 # Main Execution
 # ----------------------
 if __name__ == '__main__':
+    import os
+
+    # Path to data directory (relative to this script's location)
+    base_dir = os.path.dirname(__file__)
+    data_dir = os.path.join(base_dir, "..", "data")
+
+    # Ensure data directory exists
+    os.makedirs(data_dir, exist_ok=True)
+
     scraper = AngryMetalGuyScraper(SCORE_TAG_URLS)
     scraper.scrape()
     df_raw = scraper.to_dataframe()
-    df_raw.to_csv('../data/angrymetalguy_reviews_with_scores_raw.csv', index=False)
+    df_raw.to_csv(os.path.join(data_dir, "angrymetalguy_reviews_with_scores_raw.csv"), index=False)
 
     cleaner = AngryMetalGuyCleaner()
     df_clean = cleaner.clean(df_raw)
-    df_clean.to_csv('../data/angrymetalguy_reviews_with_scores_clean.csv', index=False)
+    df_clean.to_csv(os.path.join(data_dir, "angrymetalguy_reviews_with_scores_clean.csv"), index=False)
 
     print("Scraping and cleaning complete!")
