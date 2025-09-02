@@ -107,6 +107,7 @@ class AngryMetalGuyCleaner:
             - Keep only the first genre
             - Remove "Review" from album names
             - Normalize Black Metal and Death Metal genres
+            - Get max score from reviews
 
         Args:
             df (pd.DataFrame): Raw scraped DataFrame.
@@ -126,6 +127,12 @@ class AngryMetalGuyCleaner:
             df['Genres'].str.contains('Black Metal'), 'Black Metal',
             np.where(df['Genres'].str.contains('Death Metal'), 'Death Metal', df['Genres'])
         )
+
+        # Getting only one review per album - highest score
+        df = df.groupby(['Band', 'Album']).agg(
+            Genre=('Genres', 'first'),
+            Score=('Score', 'max')
+        ).reset_index()
 
         return df
 
