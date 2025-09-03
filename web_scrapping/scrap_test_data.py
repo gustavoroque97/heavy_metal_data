@@ -1,17 +1,3 @@
-"""
-Scraper for Death Metal and Black Metal bands from Wikipedia.
-
-This script fetches band names from the following Wikipedia pages:
-- Death Metal: !–K and L–Z
-- Black Metal: 0–K and L–Z
-
-It cleans the band names, removes section headers, merges into a single
-DataFrame, and optionally filters out bands already present in a local dataset.
-
-Author: Your Name
-Date: 2025-09-03
-"""
-
 import requests
 import re
 import pandas as pd
