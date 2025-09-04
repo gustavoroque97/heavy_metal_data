@@ -1,158 +1,116 @@
-import requests
 import re
+from typing import List, Dict
+import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 
-# ---------------------------
-# Constants
-# ---------------------------
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/116.0 Safari/537.36"
-    )
-}
 
-URLS = {
-    "death_!K": "https://en.wikipedia.org/wiki/List_of_death_metal_bands,_!%E2%80%93K",
-    "death_LZ": "https://en.wikipedia.org/wiki/List_of_death_metal_bands,_L%E2%80%93Z",
-    "black_0K": "https://en.wikipedia.org/wiki/List_of_black_metal_bands,_0%E2%80%93K",
-    "black_LZ": "https://en.wikipedia.org/wiki/List_of_black_metal_bands,_L%E2%80%93Z",
-}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ---------------------------
-# Functions
-# ---------------------------
 
-def fetch_death_metal_bands(url: str) -> list:
+class RedditDeathMetalScraper:
     """
-    Scrape Death Metal band names from a Wikipedia page using div-col structure.
-
-    Args:
-        url (str): Wikipedia page URL.
-
-    Returns:
-        list: List of band names as strings.
+    Scrapes a Reddit post containing a list of essential death metal albums.
     """
-    response = requests.get(url, headers=HEADERS)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
 
-    bands = [
-        li.get_text().split("[")[0].strip()
-        for div in soup.find_all("div", class_="div-col")
-        for li in div.find_all("li")
-    ]
-    return bands
+    def __init__(self, json_url: str):
+        self.json_url = json_url
+
+    def fetch_selftext(self) -> str:
+        """Fetch the Reddit post selftext as a string."""
+        res = requests.get(self.json_url, headers=HEADERS)
+        res.raise_for_status()
+        data = res.json()
+        post_data = data[0]['data']['children'][0]['data']
+        return post_data.get('selftext', '')
+
+    def parse_albums(self) -> pd.DataFrame:
+        """Parse the selftext and return a DataFrame with Band, Album, and Genre."""
+        selftext = self.fetch_selftext()
+        albums: List[Dict[str, str]] = []
+
+        for line in selftext.splitlines():
+            line = line.strip()
+            if not line.startswith("*"):
+                continue
+
+            # Remove leading "* "
+            line_content = line.lstrip("* ").strip()
+
+            # Skip section headers like 1), 7a), etc.
+            if re.match(r'^\d+[a-zA-Z]?\)', line_content):
+                continue
+
+            # Match Band - Album
+            match = re.match(r'(.+?)\s*-\s*(.+)$', line_content)
+            if match:
+                band, album = match.groups()
+                # Skip albums starting with numbers
+                if re.match(r'^\d', album.strip()):
+                    continue
+                albums.append({
+                    "Band": band.strip(),
+                    "Album": album.strip(),
+                    "Genre": "Death Metal"
+                })
+
+        return pd.DataFrame(albums)
 
 
-def fetch_black_metal_bands(url: str) -> list:
+class MetalAcademyBlackMetalScraper:
     """
-    Scrape Black Metal band names from a Wikipedia page.
-    Filters out junk like section headers and navigation links later.
-
-    Args:
-        url (str): Wikipedia page URL.
-
-    Returns:
-        list: List of band names as strings.
+    Scrapes a Metal Academy list of black metal albums.
     """
-    response = requests.get(url, headers=HEADERS)
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
 
-    bands = [
-        li.get_text().split("[")[0].strip()
-        for li in soup.find_all("li")
-    ]
-    return bands
+    def __init__(self, url: str):
+        self.url = url
+
+    def fetch_albums(self) -> pd.DataFrame:
+        """Fetch and return a DataFrame with cleaned album names and genre."""
+        res = requests.get(self.url, headers=HEADERS)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        release_divs = soup.find_all("div", class_="top-charts__release-name")
+        albums: List[str] = []
+
+        for div in release_divs:
+            link = div.find("a")
+            if link:
+                albums.append(link.get_text(strip=True))
+
+        # Remove years in parentheses
+        cleaned_albums = [re.sub(r'\s*\(\d{4}\)$', '', album) for album in albums]
+
+        return pd.DataFrame({
+            "Album": cleaned_albums,
+            "Genre": "Black Metal"
+        })
 
 
-def clean_band_list(bands: list) -> list:
+def build_shuffled_dataset(death_df: pd.DataFrame, black_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Clean a band list by removing section headers like "0–9", "A", "B", etc.,
-    empty strings, and keeping only names starting with 0-9 or A-Z.
-
-    Args:
-        bands (list): List of band names.
-
-    Returns:
-        list: Cleaned list of band names.
+    Concatenate death metal and black metal DataFrames, drop Band column from death,
+    shuffle rows, and reset index.
     """
-    cleaned = []
-    for band in bands:
-        band = band.strip()
-        if not band:
-            continue
-        if band == "0–9":
-            continue
-        if re.fullmatch(r'[A-Z]', band):
-            continue
-        if re.match(r'^[0-9A-Z]', band):
-            cleaned.append(band)
-    return cleaned
+    combined_df = pd.concat([death_df.drop(columns="Band"), black_df], ignore_index=True)
+    return combined_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
 
-def concat_death_black(death_metal: list, black_metal: list) -> pd.DataFrame:
-    """
-    Merge Death Metal and Black Metal lists into a single DataFrame.
-
-    Args:
-        death_metal (list): List of death metal band names.
-        black_metal (list): List of black metal band names.
-
-    Returns:
-        pd.DataFrame: DataFrame with columns "Band" and "Genre".
-    """
-    df_death = pd.DataFrame({"Band": death_metal, "Genre": "Death Metal"})
-    df_black = pd.DataFrame({"Band": black_metal, "Genre": "Black Metal"})
-    return pd.concat([df_death, df_black], ignore_index=True)
-
-
-def filter_existing_bands(bands_df: pd.DataFrame, training_data: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove bands that are already present in a local dataset CSV file.
-
-    Args:
-        bands_df (pd.DataFrame): DataFrame with scraped bands.
-        training_data (pd.DataFrame): DataFrame used for training.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame.
-    """
-    return bands_df[~bands_df["Band"].isin(training_data["Band"].to_list())]
-
-
-# ---------------------------
-# Main execution
-# ---------------------------
 if __name__ == "__main__":
-    death_metal_bands = []
-    black_metal_bands = []
+    # Scrape Reddit death metal albums
+    reddit_url = "https://www.reddit.com/r/Deathmetal/comments/wo2870/a_guide_100_essential_death_metal_albums/.json"
+    reddit_scraper = RedditDeathMetalScraper(reddit_url)
+    death_albums_df = reddit_scraper.parse_albums()
 
-    # Scrape Death Metal bands
-    for key in ("death_!K", "death_LZ"):
-        print(f"Scraping {key}...")
-        death_metal_bands.extend(fetch_death_metal_bands(URLS[key]))
-    death_metal_bands = sorted(set(death_metal_bands))
+    # Scrape Metal Academy black metal albums
+    metalacademy_url = "https://metal.academy/lists/single/221"
+    black_scraper = MetalAcademyBlackMetalScraper(metalacademy_url)
+    black_albums_df = black_scraper.fetch_albums()
 
-    # Scrape Black Metal bands
-    for key in ("black_0K", "black_LZ"):
-        print(f"Scraping {key}...")
-        black_metal_bands.extend(fetch_black_metal_bands(URLS[key]))
-    black_metal_bands = clean_band_list(black_metal_bands)
-    black_metal_bands = sorted(set(black_metal_bands))
+    # Combine and shuffle
+    df_test = build_shuffled_dataset(death_albums_df, black_albums_df)
 
-    # Merge into single DataFrame
-    bands_df = concat_death_black(death_metal_bands, black_metal_bands)
-    print(f"Total bands scraped: {len(bands_df)}")
-
-    # Filter out bands already in AMG dataset (used for training)
-    amg_data = pd.read_csv("../data/angrymetalguy_reviews_with_scores_clean.csv")
-    df_test = filter_existing_bands(bands_df, amg_data)
-
-    # Save to CSV
-    df_test.to_csv("../data/df_test.csv", index=False)
-    
-    print("Scraping and cleaning complete!")
+    # Optionally save to CSV
+    df_test.to_csv("data/df_test.csv", index=False)
+    print("Test dataset saved")
